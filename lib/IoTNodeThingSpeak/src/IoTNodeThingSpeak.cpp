@@ -22,10 +22,11 @@ TSState TSstate = START;
 // Function that handles the creation and setup of instances
 
 IoTNodeThingSpeak::IoTNodeThingSpeak(IoTNode& node, String channelID, String writeKey, const uint16_t arraySize) :
-                    _node(node), _channelID(channelID),
-                    _writeKey(writeKey), _arraySize(arraySize),
-                    framTSData(node.makeFramRing(arraySize, sizeof(fields8TS)))
-
+                    _node(node),
+                    framTSData(node.makeFramRing(arraySize, sizeof(fields8TS))),
+                    _writeKey(writeKey),
+                    _channelID(channelID),
+                    _arraySize(arraySize)
 {
     // initialize this instance's variables
 
@@ -197,8 +198,8 @@ void IoTNodeThingSpeak::TSBulkWriteCSV(String channel, String api_key, String ti
       char c;
       char code0;
       char code1;
-      char code2;
-      for (int i =0; i < str.length(); i++){
+      //char code2;
+      for (unsigned int i =0; i < str.length(); i++){
         c=str.charAt(i);
         if (c == ' '){
           encodedString+= '+';
@@ -214,7 +215,7 @@ void IoTNodeThingSpeak::TSBulkWriteCSV(String channel, String api_key, String ti
           if (c > 9){
               code0=c - 10 + 'A';
           }
-          code2='\0';
+          //code2='\0';
           encodedString+='%';
           encodedString+=code0;
           encodedString+=code1;
@@ -359,7 +360,7 @@ boolean IoTNodeThingSpeak::TSCreateChan(char const* keys[], char const* values[]
             case CREATE_CHANNEL:
                 //Close json
                 strcat(pub, "}");
-                Particle.publish("TSCreateChannel",pub);
+                Particle.publish("TSCreateChannel",pub,PRIVATE);
                 valid = true;
                 //Serial.println(pub);
                 if (arrayEnd)
@@ -388,7 +389,7 @@ boolean IoTNodeThingSpeak::updateTSChan(char const* channel, char const* values[
     boolean done = false;
     int count = 0;
 // delay(1000);
-    unsigned long beginTime = millis();
+    //unsigned long beginTime = millis();
     delay(1);
     // pointer to array values
     uint8_t i=(uint8_t)arrayIndex;

@@ -2,8 +2,8 @@
  * Project TideStation
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
- * Date: January 2020
- * Version 1.0
+ * Date: March 2020
+ * Version 1.1
  */
 
 #include "IoTNode.h"
@@ -29,11 +29,19 @@ SYSTEM_THREAD(ENABLED);
   #define DEBUG_PRINTLNF(...)
 #endif
 
+// Comment out as appropriate for default units
+#define UNITS_US
+// #define UNITS_METRIC
+
 String readings;
+String maxbotixranges = "unknown";
+uint32_t syncTime = 0; // time of boot sync
+String mllwCalibrationMess = "unknown"; // Used to display hours left for mllw calibration
 
 const int SD_CHIP_SELECT = N_D0;
 SdFat sd;
 SdCardPrintHandler printToSd(sd, SD_CHIP_SELECT, SPI_FULL_SPEED);
+
 
 STARTUP(printToSd.withMaxFilesToKeep(3000));
 
@@ -85,8 +93,8 @@ String deviceString;
 framArray framtsunit = node.makeFramArray(1, sizeof(tsunit));
 
 // Get these parameters from your ThingSpeak Channel
-#define THINGSPEAK_CHANNEL_ID "XXXXXX"
-#define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXX"
+#define THINGSPEAK_CHANNEL_ID "XXXXXXX"
+#define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXXX"
 
 // This Webhook must be created using your Particle account
 // See https://docs.particle.io/tutorials/device-cloud/webhooks/#custom-template
@@ -152,31 +160,59 @@ void readSensors()
   }
   readingTime = testTime[testNum];
   #else
-  readingTime = node.unixTime();
+  // Use Particle time if connected
+  if (Particle.connected())
+  {
+    readingTime = Time.now();
+    if (abs(readingTime-node.unixTime())>10)
+    {
+      node.setUnixTime(readingTime);
+    }
+  }
+  else
+  {
+    readingTime = node.unixTime();
+  }
+  // Check to make sure that the time has not reset somehow
+  // i.e. check that time > syncTime and less than syncTime + 1 year
+  if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
+  {
+    if (Particle.connected())
+    {
+      Particle.publish("Resetting because time NOT synced:",String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+    }
+    DEBUG_PRINT("Resetting because time NOT synced: ");
+    DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
+    System.reset();
+  }
   #endif  
 
   if (maxbotix.dualSensor)
   {
     rangeup = -maxbotix.range1Dual();
+    maxbotixranges = String("Range 1:"+String(maxbotix.range1Median())+", "+"Range 2:"+String(maxbotix.range2Median()));
   }
   else
   {
     rangeup = -maxbotix.range1Median();
+    maxbotixranges = String("Range 1:"+String(maxbotix.range1Median()));
   }
 
   #ifdef SEND_TEST_DATA
   rangeup = -range[testNum];
   Time.setTime(readingTime);
   #endif
-  DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
-  DEBUG_PRINTLN(Time.timeStr());
+
   if (rangeup<0)
   {
     tide.pushDistanceUpwards(rangeup,readingTime);
+    DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
+    DEBUG_PRINTLN(Time.timeStr());    
   }
   else
   {
-    DEBUG_PRINTLNF("Invalid Maxbotix reading");
+    DEBUG_PRINT("Invalid Maxbotix readings: ");
+    DEBUG_PRINTLN(maxbotixranges);
   }
 
 }
@@ -193,7 +229,32 @@ void sendSensors()
   }
   readingTime = testTime[testNum];
   #else
-  readingTime = node.unixTime();
+  // Use Particle time if connected
+  if (Particle.connected())
+  {
+    readingTime = Time.now();
+    if (abs(readingTime-node.unixTime())>10)
+    {
+      node.setUnixTime(readingTime);
+    }
+  }
+  else
+  {
+    readingTime = node.unixTime();
+  }
+  // Check to make sure that the time has not reset somehow
+  // i.e. check that time > syncTime and less than syncTime + 1 year
+  if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
+  {
+    if (Particle.connected())
+    {
+      Particle.publish("Resetting because time NOT synced:",String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+    }
+    DEBUG_PRINT("Resetting because time NOT synced: ");
+    DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
+    delay(100);
+    System.reset();
+  }
   #endif
 
   if (maxbotix.dualSensor)
@@ -229,6 +290,16 @@ void sendSensors()
   {
     // Then mllw not yet calculated so don't send the tide values to ThingSpeak
     tsdata.nullMap = tsdata.nullMap | 0B100000000000;
+    mllwCalibrationMess = String::format("%.2f hours until mllw calibrated and tide published", tide.mllwCalibrationHoursLeft());
+    if (Particle.connected())
+    {
+      Particle.publish("Calibrating",mllwCalibrationMess,PRIVATE);
+    }
+    DEBUG_PRINTLN(mllwCalibrationMess);
+  }
+  else
+  {
+    mllwCalibrationMess = "mllw calibrated";
   }
   float gustMPH;
   tsdata.field2 = weatherSensors.getAndResetAnemometerMPH(&gustMPH);
@@ -317,7 +388,7 @@ void sendSensors()
 
   thingSpeak.queueToSend((u_int8_t*)&tsdata);
   node.tickleWatchdog();
-  Particle.publishVitals();  // Publish vitals immmediately
+  Particle.publishVitals();  // Publish vitals immmediately 
 }
 
 // Adding explicit connect routine that has to work before the rest of the code runs
@@ -330,7 +401,8 @@ void connect()
     DEBUG_PRINTLN("Attempting to connect cellular...");
     Cellular.on();
     Cellular.connect();
-    waitFor(Cellular.ready,180000);
+    // Increased timeout for Boron 3G that seems to take a long time
+    waitFor(Cellular.ready,600000);
     if (!Cellular.ready())
     {
     DEBUG_PRINTLN("Cellular not ready - resetting");
@@ -395,7 +467,6 @@ void connect()
 
 bool syncRTC()
 {
-    uint32_t syncNow;
     bool sync = false;
     unsigned long syncTimer = millis();
 
@@ -407,15 +478,17 @@ bool syncRTC()
 
     if (Time.now() > 1465823822)
     {
-        syncNow = Time.now();//put time into memory
-        node.setUnixTime(syncNow);
+        syncTime = Time.now();//put time into memory
+        node.setUnixTime(syncTime);
         sync = true;
     }
 
     if (!sync)
     {
         #ifdef DEBUG
-        Particle.publish("Time NOT synced",String(Time.format(syncNow, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(node.unixTime(), TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+        Particle.publish("Time NOT synced",String(Time.format(syncTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(node.unixTime(), TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+        DEBUG_PRINT("Time NOT synced: ");
+        DEBUG_PRINTLN(String(Time.format(syncTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(node.unixTime(), TIME_FORMAT_ISO8601_FULL)));
         #endif
     }
     return sync;
@@ -516,7 +589,7 @@ bool checkI2CDevices()
 
 void printI2C(int inx)
 {
-    for (int i=0; i<i2cLength; i++)
+    for (uint8_t i=0; i<i2cLength; i++)
         {
           if (i2cAddr[i] == inx)
           {
@@ -570,6 +643,8 @@ void setup() {
   Particle.function("setunits", setunits);
   Particle.variable("currentReadings",readings);
   Particle.variable("devices",deviceString);
+  Particle.variable("sonarRanges",maxbotixranges);
+  Particle.variable("mllwCalibration",mllwCalibrationMess);
 
   pinMode(D1, OUTPUT);
   for (int i = 0; i < 15; i++) {
@@ -580,11 +655,12 @@ void setup() {
   }
   pinMode(D1, INPUT);
 
-  // delay(3000);
   Serial.begin(115200);
-
+  #ifdef SERIAL_DEBUG
+  delay(3000);
+  #endif
   DEBUG_PRINTLN("Starting");
-  // connect();
+  //connect();
   Wire.begin();
 
   if (!node.begin())
@@ -609,6 +685,10 @@ void setup() {
     delay(1000);
     System.reset();
   }
+  else
+  {
+    DEBUG_PRINTLN("IoT Node expander responded");
+  }
 
   node.setPowerON(EXT3V3, true);
 
@@ -622,10 +702,10 @@ void setup() {
 
   if (!node.ok())
   {
-    DEBUG_PRINTLN("IoT Node not connected. Resetting in 60 seconds.");
-    if (waitFor(Particle.connected, 10000)) 
+    DEBUG_PRINTLN("IoT Node not connected. Resetting.");
+    if (Particle.connected()) 
     {
-      Particle.publish("Error","IoT Node not connected. Resetting in 60 seconds.",PRIVATE);
+      Particle.publish("Error","IoT Node not connected. Resetting.",PRIVATE);
     }
     uint32_t millisNow = millis();
     while (millis()-millisNow < 60000)
@@ -640,7 +720,14 @@ void setup() {
       delay(500);
     }
     System.reset();
-  
+  }
+  else
+  {
+    DEBUG_PRINTLN("IoT Node connected");
+    if (Particle.connected())
+    {
+      Particle.publish("OK","IoT Node connected",PRIVATE);
+    }    
   }
 
   framtsunit.read(0,(uint8_t*)&tsunit);
@@ -649,14 +736,24 @@ void setup() {
   if (!(tsunit.levelfactor==0.00328084||tsunit.levelfactor==0.001))
   {
     // Then first run
-    tsunit.speedfactor = 1; // mph
-    tsunit.levelfactor = 0.00328084; // mm to feet
-    tsunit.fahrenheit = true;
-    tsunit.pressurefactor = 0.001; // millibars
-    framtsunit.write(0,(uint8_t*)&tsunit);  
+    // US Options
+    #ifdef UNITS_US
+      tsunit.speedfactor = 1; // mph
+      tsunit.levelfactor = 0.00328084; // mm to feet
+      tsunit.fahrenheit = true;
+      tsunit.pressurefactor = 0.001; // millibars
+    #endif
     // Use a function setunits to change these to metric
+    #ifdef UNITS_METRIC
+    // Metric options
+      tsunit.speedfactor = 0.44704; // m/s
+      tsunit.levelfactor = 0.001; // mm to meters
+      tsunit.fahrenheit = false;
+      tsunit.pressurefactor = 0.01; // hectopascals
+      #endif
+    framtsunit.write(0,(uint8_t*)&tsunit); 
   }
-
+  DEBUG_PRINTLN("Starting Weather Sensors");
   weatherSensors.begin();
 
   delay(50);
@@ -664,7 +761,7 @@ void setup() {
   deviceString.concat(weatherSensors.dsType());
   deviceString.concat(":");
 
-  if (!maxbotix.setup()>0)
+  if (!(maxbotix.setup()>0))
   {
     DEBUG_PRINTLN("No Maxbotix sensor connected. Resetting in 60 seconds.");
     if (waitFor(Particle.connected, 10000)) 
@@ -685,6 +782,11 @@ void setup() {
     }
     System.reset();
   }
+  else
+  {
+    DEBUG_PRINTLN("Maxbotix sensors connected");
+  }
+  
 
   if (maxbotix.dualSensor)
   {
@@ -716,7 +818,7 @@ void setup() {
     }
   }
 
-  delay(4000);
+  //delay(4000);
   Particle.process();
 
   thingSpeak.setup();
@@ -737,7 +839,7 @@ void setup() {
      Particle.publish("Tide not initialized","Tide not initialized",PRIVATE);
     }
   }
-  delay(4000);
+  //delay(4000);
   Particle.process();
   if (maxbotix.dualSensor)
   {
@@ -763,21 +865,31 @@ void setup() {
       }
     }    
   }
+  connect();
 
-  syncRTC();
+  if (!syncRTC())
+  {
+    DEBUG_PRINTLN("Unable to sync the time - resetting");
+    delay(500);
+    System.reset();
+  }
 
   tsdata.nullMap = 0B000000001110;
   readSensorTimer.start();
   sendSensorTimer.start();
+  uint32_t doneMillis = millis();
+  DEBUG_PRINTLNF("Seconds to complete setup: %d ",doneMillis/1000);
   if (waitFor(Particle.connected, 10000)) 
   {
-    Particle.publish("Seconds to complete setup: ",String(millis()/1000),PRIVATE);
+    Particle.publish("Seconds to complete setup: ",String(doneMillis/1000),PRIVATE);
   }
 }
 
 // loop() runs over and over again, as quickly as it can execute.
 void loop() {
+
   maxbotix.readMaxbotixCharacter();
+
   if (Particle.connected())
   {
     // Particle.process();
@@ -786,7 +898,11 @@ void loop() {
   // If message not sent to ThingSpeak in last 3 minutes then reset
   if (lastthingspeakmillis>0 && millis()-lastthingspeakmillis> SENSOR_SEND_RATE_MA*3+1000 )
   {
-    Particle.publish("Resetting","ThingSpeak message unsuccessful in past 3 attempts.",PRIVATE);
+    DEBUG_PRINTLN("Resetting. ThingSpeak message unsuccessful in past 3 attempts.");
+    if (Particle.connected())
+    {
+      Particle.publish("Resetting","ThingSpeak message unsuccessful in past 3 attempts.",PRIVATE);
+    }
     System.reset();
   }
 }
@@ -795,8 +911,6 @@ int hardreset(String resetcommand)
 {
   if (resetcommand.equals("hardreset"))
   {
-    DEBUG_PRINTLN("Hard resetting");
-    Particle.publish("Hard reset","Clearing calibration and resetting.",PRIVATE);
     tide.clear();
     maxbotix.clearDualSensorCalibration();
     System.reset();
@@ -808,8 +922,6 @@ int systemreset(String command)
 {
   if (command.equals("systemreset"))
   {
-    DEBUG_PRINTLN("System resetting");
-    Particle.publish("Reset","System resetting.",PRIVATE);
     System.reset();
   }
   return 0;  

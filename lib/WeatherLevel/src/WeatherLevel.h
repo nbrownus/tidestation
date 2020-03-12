@@ -3,6 +3,8 @@
   Copyright (c) 2019 Sentient Things, Inc.  All right reserved.
   Based on work by Rob Purser, Mathworks, Inc.
 
+  Version 0.1.2
+  Bug fixes
   Version 0.1.1
   Changes Include:
   1. Using DS18 library for DS18B20
@@ -344,6 +346,9 @@ class Maxbotix
   // library-accessible "private" interface
   private:
     IoTNode _node;
+    uint32_t _size;
+    RunningMedianInt32 max1MedianRunning;
+    RunningMedianInt32 max2MedianRunning;
 
     framArray framCalib;
 
@@ -355,9 +360,7 @@ class Maxbotix
     char serial1Buf[6];
     uint32_t rangeBegin;
     bool maxSelect;
-    RunningMedianInt32 max1MedianRunning;
-    RunningMedianInt32 max2MedianRunning;
-    uint32_t _size;
+    
     uint32_t readingCount;
     uint32_t sensor1RangeMin;
     uint32_t sensor1RangeMax;

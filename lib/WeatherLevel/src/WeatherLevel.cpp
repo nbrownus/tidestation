@@ -70,7 +70,7 @@ void Weather::begin(void)
   // tsl.setTiming(TSL2591_INTEGRATIONTIME_600MS);  // longest integration time (dim light)
 
 
-  tsl2591Gain_t gain = tsl.getGain();
+  //tsl2591Gain_t gain = tsl.getGain();
 }
 
 float  Weather::getAndResetAnemometerMPH(float * gustMPH)
@@ -151,7 +151,7 @@ uint16_t Weather::getAndResetLightLux()
   {
     lightLuxTotal=0;
     lightLuxCount=0;
-    return NULL;
+    return 0;
   } 
 }
 
@@ -1055,7 +1055,8 @@ void Maxbotix::emptySerial1Chars()
     // Serial.println();
     for (int ii=0; ii < numChars; ii++ )
     {    
-        char c = Serial1.read();
+        Serial1.read();
+        // char c = Serial1.read();
         // if (c=='\r')
         // {
         //     Serial.println();

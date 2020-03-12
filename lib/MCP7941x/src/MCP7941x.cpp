@@ -390,6 +390,7 @@ byte MCP7941x::getSramByte ( byte location )
 
     return WireReceive();
   }
+  return (byte)255;
 }
 
 // New timer functions here
@@ -486,7 +487,7 @@ int MCP7941x::getAlarm0UnixTime()
   byte sec;
   byte min;
   byte hr;
-  byte dyofWk;
+  //byte dyofWk;
   byte dyofMnth;
   byte mnth;
   byte yr;
@@ -501,7 +502,7 @@ int MCP7941x::getAlarm0UnixTime()
   sec     = bcdToDec(WireReceive() & 0x7f);  // 01111111
   min     = bcdToDec(WireReceive() & 0x7f);  // 01111111
   hr       = bcdToDec(WireReceive() & 0x3f);  // 00111111
-  dyofWk  = bcdToDec(WireReceive() & 0x07);  // 01111111
+  //dyofWk  = bcdToDec(WireReceive() & 0x07);  // 01111111
   dyofMnth = bcdToDec(WireReceive() & 0x3f);  // 00111111
   mnth      = bcdToDec(WireReceive() & 0x1f);  // 00011111
   yr = 0;
