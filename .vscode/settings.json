@@ -6,7 +6,6 @@
         "*.ino": "cpp",
         "iterator": "cpp"
     },
-    "particle.targetDevice": "DualTide",
     "particle.firmwareVersion": "1.4.4",
     "particle.targetPlatform": "boron"
 }

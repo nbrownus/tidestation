@@ -3,7 +3,7 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: March 2020
- * Version 1.1
+ * Version 1.2
  */
 
 #include "IoTNode.h"
@@ -11,6 +11,18 @@
 #include "IoTNodeThingSpeak.h"
 #include "WeatherLevel.h"
 #include "SdCardLogHandlerRK.h"
+// Create a thingspeakkeys.h file to include
+// or comment out this include
+#include "thingspeakkeys.h"
+
+/*
+//Contents of thingspeakkeys.h file
+#define THINGSPEAK_KEYS
+// Get these parameters from your ThingSpeak Channel
+#define THINGSPEAK_CHANNEL_ID "XXXXXXX"
+#define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXXX"
+*/
+
 
 SYSTEM_THREAD(ENABLED);
 // SYSTEM_MODE(MANUAL);
@@ -30,8 +42,15 @@ SYSTEM_THREAD(ENABLED);
 #endif
 
 // Comment out as appropriate for default units
-#define UNITS_US
-// #define UNITS_METRIC
+// #define UNITS_US
+#define UNITS_METRIC
+
+// THINGSPEAK_KEYS is defined in thingspeakkeys.h if it exists
+#ifndef THINGSPEAK_KEYS
+// Get these parameters from your ThingSpeak Channel
+#define THINGSPEAK_CHANNEL_ID "XXXXXXX"
+#define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXXX"
+#endif
 
 String readings;
 String maxbotixranges = "unknown";
@@ -79,22 +98,22 @@ Weather weatherSensors;
 
 typedef struct
 {
+    bool fahrenheit; // C
+    int firstrun;  
     float speedfactor; // m/s
     float levelfactor;
-    bool fahrenheit = false; // C
     float pressurefactor; // millibars
 }TSunit_t;
 
 TSunit_t tsunit;
+
+int firstrunvalue = 123456;
 
 String deviceString;
 
 // Create an array of tsunit struct
 framArray framtsunit = node.makeFramArray(1, sizeof(tsunit));
 
-// Get these parameters from your ThingSpeak Channel
-#define THINGSPEAK_CHANNEL_ID "XXXXXXX"
-#define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXXX"
 
 // This Webhook must be created using your Particle account
 // See https://docs.particle.io/tutorials/device-cloud/webhooks/#custom-template
@@ -147,6 +166,17 @@ TSdata_t tsdata;
 
 void readSensors()
 {
+  if (!checkI2CDevices())
+  {
+    DEBUG_PRINTLN("Error reading I2C devices. Resetting.");
+    if (Particle.connected())
+    {
+      Particle.publish("Error reading I2C devices. Resetting.",PRIVATE);
+    }
+    delay(500);
+    System.reset();
+  }
+  
   weatherSensors.captureWindVane();
   weatherSensors.captureTempHumidityPressure();
   weatherSensors.captureWaterTemp();
@@ -546,24 +576,31 @@ bool checkI2CDevices()
     // the Write.endTransmisstion to see if
     // a device did acknowledge to the address.
     address = i2cAddr[i];
-
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-
+    WITH_LOCK(Wire)
+    {
+      Wire.beginTransmission(address);
+      error = Wire.endTransmission();
+    }
     //Try again if !error=0
     if (!error==0)
     {
       delay(10);
-      Wire.beginTransmission(address);
-      error = Wire.endTransmission();
+      WITH_LOCK(Wire)
+      {
+        Wire.beginTransmission(address);
+        error = Wire.endTransmission();
+      }
     }
 
     //Try reset if !error=0
     if (!error==0)
     {
-      Wire.reset();
-      Wire.beginTransmission(address);
-      error = Wire.endTransmission();
+      WITH_LOCK(Wire)
+      {      
+        Wire.reset();
+        Wire.beginTransmission(address);
+        error = Wire.endTransmission();
+      }
     }
  
     if (error == 0)
@@ -610,8 +647,11 @@ void scanI2C()
     // The i2c_scanner uses the return value of
     // the Write.endTransmisstion to see if
     // a device did acknowledge to the address.
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
+    WITH_LOCK(Wire)
+    {
+      Wire.beginTransmission(address);
+      error = Wire.endTransmission();
+    }
  
     if (error == 0)
     {
@@ -645,6 +685,10 @@ void setup() {
   Particle.variable("devices",deviceString);
   Particle.variable("sonarRanges",maxbotixranges);
   Particle.variable("mllwCalibration",mllwCalibrationMess);
+
+  // Used for debug
+  // pinMode(D5,OUTPUT);
+  // digitalWrite(D5,HIGH);
 
   pinMode(D1, OUTPUT);
   for (int i = 0; i < 15; i++) {
@@ -730,18 +774,41 @@ void setup() {
     }    
   }
 
-  framtsunit.read(0,(uint8_t*)&tsunit);
-
-  // Check units and set the first time running
-  if (!(tsunit.levelfactor==0.00328084||tsunit.levelfactor==0.001))
+  // Check three times if needed for additional reliability
+  int checktimes = 0;
+  bool unitsokay = false;
+  do
   {
+    framtsunit.read(0,(uint8_t*)&tsunit);
+    if (tsunit.firstrun==firstrunvalue)
+    {
+      unitsokay=true;
+    }
+    checktimes++;
+  } while ((unitsokay==false)&&(checktimes<3));
+
+  // DEBUG_PRINTLNF("%1.1f",tsunit.speedfactor);
+  // DEBUG_PRINTLNF("%1.10f",tsunit.levelfactor);
+  // DEBUG_PRINTLNF("%1.8f",tsunit.fahrenheit);
+  // DEBUG_PRINTLNF("%1.10f",tsunit.pressurefactor);
+  // DEBUG_PRINTLN(tsunit.firstrun);
+  // DEBUG_PRINTLN(unitsokay);
+
+  // Set units if the first time running
+  if (!unitsokay)
+  {
+    tsunit.firstrun=firstrunvalue;
+    DEBUG_PRINT("Level factor = ");
+    DEBUG_PRINTLN(tsunit.levelfactor);
     // Then first run
+    DEBUG_PRINT("Setting units to: ");
     // US Options
     #ifdef UNITS_US
       tsunit.speedfactor = 1; // mph
       tsunit.levelfactor = 0.00328084; // mm to feet
       tsunit.fahrenheit = true;
-      tsunit.pressurefactor = 0.001; // millibars
+      tsunit.pressurefactor = 0.01; // millibars
+      DEBUG_PRINTLN("US");
     #endif
     // Use a function setunits to change these to metric
     #ifdef UNITS_METRIC
@@ -750,9 +817,11 @@ void setup() {
       tsunit.levelfactor = 0.001; // mm to meters
       tsunit.fahrenheit = false;
       tsunit.pressurefactor = 0.01; // hectopascals
+      DEBUG_PRINTLN("metric");
       #endif
     framtsunit.write(0,(uint8_t*)&tsunit); 
   }
+
   DEBUG_PRINTLN("Starting Weather Sensors");
   weatherSensors.begin();
 
@@ -929,6 +998,7 @@ int systemreset(String command)
 
 int setunits(String type)
 {
+ tsunit.firstrun=firstrunvalue;
   if (type == "metric")
   {
     tsunit.speedfactor = 0.44704; // m/s

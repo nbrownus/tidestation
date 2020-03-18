@@ -60,7 +60,48 @@ uint32_t IoTNodeThingSpeak::process()
     if ((lastSendTime == 0 || millis()-lastSendTime>16000) && !framTSData.isEmpty())
     {      
         fields8TS_t lastMessage;
-        framTSData.peekLast((uint8_t*)&lastMessage);
+        // framTSData.peekLast((uint8_t*)&lastMessage);
+        fields8TS_t checkMessage;
+
+        int checktimes = 0;
+        bool peekokay = false;       
+        // Adding code to check the peek up to three times if necessary
+        // to avoid I2C read errors
+        do
+        {         
+            framTSData.peekLast((uint8_t*)&lastMessage);
+            framTSData.peekLast((uint8_t*)&checkMessage);
+            if (
+                (lastMessage.field1==checkMessage.field1)&&
+                (lastMessage.field2==checkMessage.field2)&&
+                (lastMessage.field3==checkMessage.field3)&&
+                (lastMessage.field4==checkMessage.field4)&&
+                (lastMessage.field5==checkMessage.field5)&&
+                (lastMessage.field6==checkMessage.field6)&&
+                (lastMessage.field7==checkMessage.field7)&&
+                (lastMessage.field8==checkMessage.field8)&&
+                (strcmp(lastMessage.status,checkMessage.status)==0)
+            )
+            {
+                peekokay=true;
+            }
+            checktimes++;
+        } while ((peekokay==false)&&(checktimes<3));
+        if (peekokay==false)
+        {
+            Serial.println("ERROR READING FRAM");
+            Serial.println(lastMessage.field1);
+            Serial.println(lastMessage.field2);
+            Serial.println(lastMessage.field3);
+            Serial.println(lastMessage.field4);
+            Serial.println(lastMessage.field5);
+            Serial.println(lastMessage.field6);
+            Serial.println(lastMessage.field7);
+            Serial.println(lastMessage.field8);
+            Serial.println(lastMessage.status);
+            Serial.println(lastMessage.nullMap,BIN);
+            return lastSendTime;    
+        }
         bool firstpass = true;
         String mess;
         String messdata;
@@ -119,7 +160,6 @@ uint32_t IoTNodeThingSpeak::process()
             firstpass = false;
         }
         mess.concat("\"}");
-
         //Webhook
         // {
         //     "event": "TSBulkWriteCSV",
