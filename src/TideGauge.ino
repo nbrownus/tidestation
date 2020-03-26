@@ -3,7 +3,7 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: March 2020
- * Version 1.2
+ * Version 1.3
  */
 
 #include "IoTNode.h"
@@ -42,8 +42,8 @@ SYSTEM_THREAD(ENABLED);
 #endif
 
 // Comment out as appropriate for default units
-// #define UNITS_US
-#define UNITS_METRIC
+#define UNITS_US
+//#define UNITS_METRIC
 
 // THINGSPEAK_KEYS is defined in thingspeakkeys.h if it exists
 #ifndef THINGSPEAK_KEYS
@@ -54,7 +54,7 @@ SYSTEM_THREAD(ENABLED);
 
 String readings;
 String maxbotixranges = "unknown";
-uint32_t syncTime = 0; // time of boot sync
+uint32_t syncTime = 1584569584; // time of boot sync or 03/18/2020 @ 10:13pm (UTC)
 String mllwCalibrationMess = "unknown"; // Used to display hours left for mllw calibration
 
 const int SD_CHIP_SELECT = N_D0;
@@ -109,7 +109,7 @@ TSunit_t tsunit;
 
 int firstrunvalue = 123456;
 
-String deviceString;
+String deviceString = "Devices = ";
 
 // Create an array of tsunit struct
 framArray framtsunit = node.makeFramArray(1, sizeof(tsunit));
@@ -194,7 +194,8 @@ void readSensors()
   if (Particle.connected())
   {
     readingTime = Time.now();
-    if (abs(readingTime-node.unixTime())>10)
+    uint32_t timeDiff = readingTime-node.unixTime();
+    if (abs(timeDiff)>10)
     {
       node.setUnixTime(readingTime);
     }
@@ -204,8 +205,11 @@ void readSensors()
     readingTime = node.unixTime();
   }
   // Check to make sure that the time has not reset somehow
-  // i.e. check that time > syncTime and less than syncTime + 1 year
-  if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
+  // i.e. check that time > syncTime 
+  //and less than syncTime + 10 years?
+
+  if (!(readingTime >= syncTime))
+  // if (!((readingTime >= syncTime) && (readingTime < syncTime+315360000)))
   {
     if (Particle.connected())
     {
@@ -213,6 +217,7 @@ void readSensors()
     }
     DEBUG_PRINT("Resetting because time NOT synced: ");
     DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
+    delay(100);
     System.reset();
   }
   #endif  
@@ -237,7 +242,7 @@ void readSensors()
   {
     tide.pushDistanceUpwards(rangeup,readingTime);
     DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
-    DEBUG_PRINTLN(Time.timeStr());    
+    DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));    
   }
   else
   {
@@ -274,7 +279,8 @@ void sendSensors()
   }
   // Check to make sure that the time has not reset somehow
   // i.e. check that time > syncTime and less than syncTime + 1 year
-  if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
+  if (!(readingTime >= syncTime))
+  // if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
   {
     if (Particle.connected())
     {
@@ -303,7 +309,7 @@ void sendSensors()
   #endif
   tsdata.messageTime = readingTime;
   DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
-  DEBUG_PRINTLN(Time.timeStr());
+  DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
   
   if (rangeup<0)
   {
@@ -339,13 +345,13 @@ void sendSensors()
   {
     // Send null
     tsdata.nullMap = tsdata.nullMap | 0B000100000000;
-    // deviceString.concat("DS18B20-bad:");
+
   }
   else
   {
     // Send value
     tsdata.nullMap = tsdata.nullMap & 0B111011111111;
-    // deviceString.concat("DS18B20:");
+
   }
   
   if (tsunit.fahrenheit)
@@ -481,7 +487,7 @@ void connect()
     Particle.connect();
     // Note: that conditions must be a function that takes a void argument function(void) with the () removed,
     // e.g. Particle.connected instead of Particle.connected().
-    waitFor(Particle.connected,60000);
+    waitFor(Particle.connected,90000);
     if (!Particle.connected())
     {
       DEBUG_PRINTLN("Particle not connected - resetting");
@@ -525,7 +531,7 @@ bool syncRTC()
 }
 
 String deviceStatus;
-String i2cDevices;
+String i2cDevices = "";
 bool resetDevice = false;
 
 String i2cNames[] =
@@ -570,6 +576,7 @@ bool checkI2CDevices()
 {
   byte error, address;
   bool result = true;
+  i2cDevices = "";
   for (size_t i=0; i<i2cLength; ++i)
   {
     // The i2c_scanner uses the return value of
@@ -607,17 +614,16 @@ bool checkI2CDevices()
     {
       DEBUG_PRINTLN(String("Device "+i2cNames[i]+ " at"+" address:0x"+String(address, HEX)));
       i2cExists[i]=true;
-      //string.concat(string2);
-      deviceString.concat(i2cNames[i]);
-      deviceString.concat(":");
+      i2cDevices.concat(i2cNames[i]);
+      i2cDevices.concat(":");
     }
     else
     {
       DEBUG_PRINTLN(String("Device "+i2cNames[i]+ " NOT at"+" address:0x"+String(address, HEX)));
       i2cExists[i]=false;
       result = false;
-      deviceString.concat(i2cNames[i]);
-      deviceString.concat("-missing:");
+      i2cDevices.concat(i2cNames[i]);
+      i2cDevices.concat("-missing:");
     }
   }
   return result;
@@ -673,8 +679,12 @@ void scanI2C()
     DEBUG_PRINTLN("done\n");
 }
 
-uint32_t lastthingspeakmillis;
-
+uint32_t lastthingspeakmillis=0;
+String startupStatus;
+bool setupError = false;
+bool startupMessSent = false;
+uint32_t doneMillis;
+String setupSec;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // setup() runs once, when the device is first turned on.
 void setup() {
@@ -701,37 +711,40 @@ void setup() {
 
   Serial.begin(115200);
   #ifdef SERIAL_DEBUG
-  delay(3000);
+  delay(1000);
   #endif
   DEBUG_PRINTLN("Starting");
-  //connect();
+
   Wire.begin();
 
   if (!node.begin())
   {
-    DEBUG_PRINTLN("IoT Node expander not responding. Resetting in 60 seconds.");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-      Particle.publish("Error","IoT Node expander not responding. Resetting in 60 seconds.",PRIVATE);
-    }
-    uint32_t millisNow = millis();
-    while (millis()-millisNow < 60000)
-    {
-      blinkOrange.setActive(true);
-      delay(500);
-      blinkOrange.setActive(false);
-      blinkYellow.setActive(true);
-      delay(500);
-      blinkYellow.setActive(false);
-      blinkOrange.setActive(true);
-      delay(500);
-    }
-    delay(1000);
-    System.reset();
+    DEBUG_PRINTLN("IoT Node expander not responding. Resetting after connected.");
+    startupStatus = "IoT Node Error. ";
+    setupError = true;
+    // if (waitFor(Particle.connected, 10000)) 
+    // {
+    //   Particle.publish("Error","IoT Node expander not responding. Resetting after connected.",PRIVATE);
+    // }
+    // uint32_t millisNow = millis();
+    // while (millis()-millisNow < 60000)
+    // {
+    //   blinkOrange.setActive(true);
+    //   delay(500);
+    //   blinkOrange.setActive(false);
+    //   blinkYellow.setActive(true);
+    //   delay(500);
+    //   blinkYellow.setActive(false);
+    //   blinkOrange.setActive(true);
+    //   delay(500);
+    // }
+    // delay(1000);
+    // System.reset();
   }
   else
   {
     DEBUG_PRINTLN("IoT Node expander responded");
+    startupStatus = "IoT Node OK. ";
   }
 
   node.setPowerON(EXT3V3, true);
@@ -740,38 +753,20 @@ void setup() {
 
   delay(1000);
 
-  // scanI2C();
-
   checkI2CDevices();
+
+  deviceString = i2cDevices;
 
   if (!node.ok())
   {
-    DEBUG_PRINTLN("IoT Node not connected. Resetting.");
-    if (Particle.connected()) 
-    {
-      Particle.publish("Error","IoT Node not connected. Resetting.",PRIVATE);
-    }
-    uint32_t millisNow = millis();
-    while (millis()-millisNow < 60000)
-    {
-      blinkOrange.setActive(true);
-      delay(500);
-      blinkOrange.setActive(false);
-      blinkBlue.setActive(true);
-      delay(500);
-      blinkBlue.setActive(false);
-      blinkOrange.setActive(true);
-      delay(500);
-    }
-    System.reset();
+    DEBUG_PRINTLN("IoT Node not connected. Resetting after connected.");
+    startupStatus.concat("IoT Node not connected. ");
+    setupError = true;   
   }
   else
   {
     DEBUG_PRINTLN("IoT Node connected");
-    if (Particle.connected())
-    {
-      Particle.publish("OK","IoT Node connected",PRIVATE);
-    }    
+    startupStatus.concat("IoT Node connected. ");
   }
 
   // Check three times if needed for additional reliability
@@ -833,30 +828,15 @@ void setup() {
   if (!(maxbotix.setup()>0))
   {
     DEBUG_PRINTLN("No Maxbotix sensor connected. Resetting in 60 seconds.");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-      Particle.publish("Error","No Maxbotix sensor connected. Resetting in 60 seconds.",PRIVATE);
-    }
-    uint32_t millisNow = millis();
-    while (millis()-millisNow < 60000)
-    {
-      blinkBlue.setActive(true);
-      delay(500);
-      blinkBlue.setActive(false);
-      blinkYellow.setActive(true);
-      delay(500);
-      blinkYellow.setActive(false);
-      blinkBlue.setActive(true);
-      delay(500);
-    }
-    System.reset();
+    startupStatus.concat("No Maxbotix sensor. ");
+    setupError = true;
   }
   else
   {
     DEBUG_PRINTLN("Maxbotix sensors connected");
+    startupStatus.concat("Maxbotix connected. ");
   }
   
-
   if (maxbotix.dualSensor)
   {
     DEBUG_PRINT("Maxbotix sensor 1: MB");
@@ -869,10 +849,6 @@ void setup() {
     deviceString.concat("MB");
     deviceString.concat(String(maxbotix.sensor2ModelNum));
     deviceString.concat(":");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-      Particle.publish("deviceString",deviceString,PRIVATE);
-    }
   }
   else
   {
@@ -881,77 +857,103 @@ void setup() {
     deviceString.concat("MB");
     deviceString.concat(String(maxbotix.sensor1ModelNum));
     deviceString.concat(":");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-     Particle.publish("deviceString",deviceString,PRIVATE);
-    }
   }
 
-  //delay(4000);
-  Particle.process();
-
   thingSpeak.setup();
-
+  bool tideinitialized = false;
   if (tide.initialize())
   {
     DEBUG_PRINTLN("Tide initialized");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-      Particle.publish("Tide initialized","Tide initialized",PRIVATE);
-    }
+    startupStatus.concat("Tide initialized. ");
+    tideinitialized = true;
   }
   else
   {
     DEBUG_PRINTLN("Tide not initialized");
-    if (waitFor(Particle.connected, 10000)) 
-    {
-     Particle.publish("Tide not initialized","Tide not initialized",PRIVATE);
-    }
+    startupStatus.concat("Tide not initialized. ");
   }
-  //delay(4000);
-  Particle.process();
+
+  String debugmessage;
   if (maxbotix.dualSensor)
   {
     if(!maxbotix.isDualSensorCalibrated())
     {      
-      String debugmessage;
       maxbotix.calibrateDualSensorOffSet();
-      debugmessage = "The dual Maxbotix sensors were calibrated and are offset by: " + String(maxbotix.calib.dualSensorOffset) + " mm";
+      DEBUG_PRINTLN("Calibrating sonar.");
+      debugmessage = "Maxbotix sensors offset: " + String(maxbotix.calib.dualSensorOffset) + " mm. ";
       DEBUG_PRINTLN(debugmessage);
-    if (waitFor(Particle.connected, 10000)) 
-    {
-     Particle.publish("Calibration status",debugmessage,PRIVATE);
-    }
+      startupStatus.concat(debugmessage);
     }
     else
     {
-      String debugmessage;
-      debugmessage = "The dual Maxbotix sensors are already calibrated and are offset by: " + String(maxbotix.calib.dualSensorOffset) + " mm";
+      debugmessage = "Maxbotix sensors offset: " + String(maxbotix.calib.dualSensorOffset) + " mm. ";
       DEBUG_PRINTLN(debugmessage);
-      if (waitFor(Particle.connected, 10000)) 
-      {
-        Particle.publish("Calibration status",debugmessage,PRIVATE);
-      }
-    }    
+    }
   }
-  connect();
 
-  if (!syncRTC())
+  startupStatus.concat(deviceString);
+
+  if (!(node.unixTime() >= syncTime))
   {
-    DEBUG_PRINTLN("Unable to sync the time - resetting");
-    delay(500);
+    if (setupError)
+    {
+      DEBUG_PRINTLN("Time not set.");
+      startupStatus.concat("Time not set. ");
+    }
+    else
+    {
+      // Connect and set time before continuing
+      connect();
+      if (syncRTC())
+      {
+        DEBUG_PRINTLN("Time reset.");
+        startupStatus.concat("Time reset. ");
+      }
+      else
+      {
+        DEBUG_PRINTLN("Time not set.");
+        startupStatus.concat("Time not set.");
+        setupError = true;
+      }
+    }
+  }
+
+  if (setupError)
+  {
+    connect();
+    syncRTC();
+    doneMillis = millis();
+    setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
+    DEBUG_PRINTLN(setupSec);
+    startupStatus.concat(setupSec);
+    startupStatus.concat("Startup Error. Resetting.");
+    Particle.publish("Startup status",startupStatus,PRIVATE);
+    DEBUG_PRINTLN(startupStatus);
+    delay(3000);
     System.reset();
+  }
+  else
+  {
+    if (Particle.connected()) 
+    {
+      syncRTC();
+      doneMillis = millis();
+      setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
+      DEBUG_PRINTLN(setupSec);
+      startupStatus.concat(setupSec);
+      Particle.publish("Startup status",startupStatus,PRIVATE);
+      startupMessSent = true;
+    }
+    else
+    {
+      DEBUG_PRINTLN("Starting measurements while attempting to connect.");
+    }
+    
   }
 
   tsdata.nullMap = 0B000000001110;
   readSensorTimer.start();
   sendSensorTimer.start();
-  uint32_t doneMillis = millis();
-  DEBUG_PRINTLNF("Seconds to complete setup: %d ",doneMillis/1000);
-  if (waitFor(Particle.connected, 10000)) 
-  {
-    Particle.publish("Seconds to complete setup: ",String(doneMillis/1000),PRIVATE);
-  }
 }
 
 // loop() runs over and over again, as quickly as it can execute.
@@ -964,15 +966,30 @@ void loop() {
     // Particle.process();
     lastthingspeakmillis = thingSpeak.process();
   }
-  // If message not sent to ThingSpeak in last 3 minutes then reset
-  if (lastthingspeakmillis>0 && millis()-lastthingspeakmillis> SENSOR_SEND_RATE_MA*3+1000 )
+  // If message not sent to ThingSpeak in last 6 minutes then reset
+  if (millis()-lastthingspeakmillis> SENSOR_SEND_RATE_MA*6+1000 )
   {
-    DEBUG_PRINTLN("Resetting. ThingSpeak message unsuccessful in past 3 attempts.");
+    DEBUG_PRINTLN("Resetting. ThingSpeak message unsuccessful in past 6 attempts.");
     if (Particle.connected())
     {
-      Particle.publish("Resetting","ThingSpeak message unsuccessful in past 3 attempts.",PRIVATE);
+      Particle.publish("Resetting","ThingSpeak message unsuccessful in past 6 attempts.",PRIVATE);
     }
+    delay(50);
     System.reset();
+  }
+
+  if (!startupMessSent)
+  {
+    if (Particle.connected())
+    {
+      doneMillis = millis();
+      setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
+      DEBUG_PRINTLN(setupSec);
+      startupStatus.concat(setupSec);
+      Particle.publish("Startup status",startupStatus,PRIVATE);
+      startupMessSent = true;
+      DEBUG_PRINTLN("Connected");
+    }
   }
 }
 
