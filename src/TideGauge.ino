@@ -2,10 +2,10 @@
  * Project TideStation
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
- * Date: March 2020
- * Version 1.3
+ * Date: April 2020
+ * Version 1.4
+ * Update to only use the Particle time as the device is always on.
  */
-
 #include "IoTNode.h"
 #include "TideStats.h"
 #include "IoTNodeThingSpeak.h"
@@ -190,26 +190,11 @@ void readSensors()
   }
   readingTime = testTime[testNum];
   #else
-  // Use Particle time if connected
-  if (Particle.connected())
-  {
-    readingTime = Time.now();
-    uint32_t timeDiff = readingTime-node.unixTime();
-    if (abs(timeDiff)>10)
-    {
-      node.setUnixTime(readingTime);
-    }
-  }
-  else
-  {
-    readingTime = node.unixTime();
-  }
-  // Check to make sure that the time has not reset somehow
-  // i.e. check that time > syncTime 
-  //and less than syncTime + 10 years?
+  // Use Particle time since the device is always on and the RTC time is not needed
+  readingTime = Time.now();
 
+  // Check to make sure that the time has not reset somehow
   if (!(readingTime >= syncTime))
-  // if (!((readingTime >= syncTime) && (readingTime < syncTime+315360000)))
   {
     if (Particle.connected())
     {
@@ -264,23 +249,11 @@ void sendSensors()
   }
   readingTime = testTime[testNum];
   #else
-  // Use Particle time if connected
-  if (Particle.connected())
-  {
-    readingTime = Time.now();
-    if (abs(readingTime-node.unixTime())>10)
-    {
-      node.setUnixTime(readingTime);
-    }
-  }
-  else
-  {
-    readingTime = node.unixTime();
-  }
+  // Use Particle time since the device is always on and the RTC time is not needed
+  readingTime = Time.now();
+
   // Check to make sure that the time has not reset somehow
-  // i.e. check that time > syncTime and less than syncTime + 1 year
   if (!(readingTime >= syncTime))
-  // if (!((readingTime >= syncTime) && (readingTime < syncTime+31536000)))
   {
     if (Particle.connected())
     {
