@@ -3,6 +3,8 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: April 2020
+ * Version 1.5
+ * Added explicit hard reset messages
  * Version 1.4
  * Update to only use the Particle time as the device is always on.
  */
@@ -658,6 +660,7 @@ bool setupError = false;
 bool startupMessSent = false;
 uint32_t doneMillis;
 String setupSec;
+bool resetNow = false;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // setup() runs once, when the device is first turned on.
 void setup() {
@@ -964,15 +967,27 @@ void loop() {
       DEBUG_PRINTLN("Connected");
     }
   }
+
+  // Received hardreset from console
+  if (resetNow)
+  {
+    tide.clear();
+    maxbotix.clearDualSensorCalibration();
+    Serial.println("Hard resetting!");
+    if (Particle.connected())
+    {
+      Particle.publish("Hard Resetting","Hard reset message received.",PRIVATE);
+    }
+    delay(1000);
+    System.reset();
+  }
 }
 
 int hardreset(String resetcommand)
 {
   if (resetcommand.equals("hardreset"))
   {
-    tide.clear();
-    maxbotix.clearDualSensorCalibration();
-    System.reset();
+    resetNow = true;
   }
   return 0;
 }
