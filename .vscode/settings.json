@@ -9,6 +9,6 @@
         "future": "cpp"
     },
     "particle.firmwareVersion": "1.4.4",
-    "particle.targetPlatform": "boron",
-    "particle.targetDevice": ""
+    "particle.targetPlatform": "argon",
+    "particle.targetDevice": "Argon-IoTNode-1"
 }

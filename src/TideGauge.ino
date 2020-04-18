@@ -3,6 +3,9 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: April 2020
+ * Version 1.6
+ * Error message edits
+ * Fix bug with hardreset delay hard fault
  * Version 1.5
  * Added explicit hard reset messages
  * Version 1.4
@@ -661,6 +664,8 @@ bool startupMessSent = false;
 uint32_t doneMillis;
 String setupSec;
 bool resetNow = false;
+bool clearCalibration = false;
+uint32_t resetDelay;
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // setup() runs once, when the device is first turned on.
 void setup() {
@@ -695,12 +700,12 @@ void setup() {
 
   if (!node.begin())
   {
-    DEBUG_PRINTLN("IoT Node expander not responding. Resetting after connected.");
+    DEBUG_PRINTLN("IoT Node expander not responding. Resetting after connection is made.");
     startupStatus = "IoT Node Error. ";
     setupError = true;
     // if (waitFor(Particle.connected, 10000)) 
     // {
-    //   Particle.publish("Error","IoT Node expander not responding. Resetting after connected.",PRIVATE);
+    //   Particle.publish("Error","IoT Node expander not responding. Resetting after connection is made..",PRIVATE);
     // }
     // uint32_t millisNow = millis();
     // while (millis()-millisNow < 60000)
@@ -735,7 +740,7 @@ void setup() {
 
   if (!node.ok())
   {
-    DEBUG_PRINTLN("IoT Node not connected. Resetting after connected.");
+    DEBUG_PRINTLN("IoT Node not connected. Resetting after connection is made.");
     startupStatus.concat("IoT Node not connected. ");
     setupError = true;   
   }
@@ -803,7 +808,7 @@ void setup() {
 
   if (!(maxbotix.setup()>0))
   {
-    DEBUG_PRINTLN("No Maxbotix sensor connected. Resetting in 60 seconds.");
+    DEBUG_PRINTLN("No Maxbotix sensor connected. Resetting after connection is made.");
     startupStatus.concat("No Maxbotix sensor. ");
     setupError = true;
   }
@@ -968,8 +973,8 @@ void loop() {
     }
   }
 
-  // Received hardreset from console
-  if (resetNow)
+  // Received hardreset from console so clear calibration
+  if (clearCalibration)
   {
     tide.clear();
     maxbotix.clearDualSensorCalibration();
@@ -978,16 +983,28 @@ void loop() {
     {
       Particle.publish("Hard Resetting","Hard reset message received.",PRIVATE);
     }
-    delay(1000);
-    System.reset();
+    resetDelay = millis();
+    resetNow = true;
+    clearCalibration = false;
+    // delay(1000);
+    // System.reset();
   }
+  // Check to see hardreset is needed and enough time has passed since clearing calibration
+  if (resetNow)
+  {
+    if(millis()-resetDelay>1000)
+    {
+      System.reset();
+    }
+  }
+
 }
 
 int hardreset(String resetcommand)
 {
   if (resetcommand.equals("hardreset"))
   {
-    resetNow = true;
+    clearCalibration = true;
   }
   return 0;
 }
