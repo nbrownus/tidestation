@@ -3,6 +3,8 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: April 2020
+ * Version 1.7
+ * Update TideStats to 0.0.4 to use Time.now()
  * Version 1.6
  * Error message edits
  * Fix bug with hardreset delay hard fault
