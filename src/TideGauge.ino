@@ -3,6 +3,8 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: April 2020
+ * Version 1.8
+ * Corrected bug in setting us units
  * Version 1.7
  * Update TideStats to 0.0.4 to use Time.now()
  * Version 1.6
@@ -1037,7 +1039,7 @@ int setunits(String type)
     tsunit.speedfactor = 1; // mph
     tsunit.levelfactor = 0.00328084; // mm to feet
     tsunit.fahrenheit = true;
-    tsunit.pressurefactor = 0.001; // millibars
+    tsunit.pressurefactor = 0.01; // millibars
     framtsunit.write(0,(uint8_t*)&tsunit);
     DEBUG_PRINTLN("Setting units to us.");
   }
