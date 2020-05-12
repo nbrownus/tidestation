@@ -2,7 +2,16 @@
  * Project TideStation
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
- * Date: April 2020
+ * Date: May 2020
+ * Version 1.8.2
+ * Set flags using timers for readSensors and sendSensors
+ * Move readSensors and sendSensors to loop to minimize timing conflicts
+ * Increased Maxbotix timeout to account for DS18B20 delay
+ * (Need to swap out DS18B20 library for non-blocking later.)
+ * Added version variable
+ * New getTime function for more robust time checks
+ * Version 1.8.1
+ * Update WeatherLevel library
  * Version 1.8
  * Corrected bug in setting us units
  * Version 1.7
@@ -61,10 +70,18 @@ SYSTEM_THREAD(ENABLED);
 #define THINGSPEAK_WRITE_KEY "XXXXXXXXXXXXXXXXX"
 #endif
 
+//********************************************
+// Change this value to force the settings to be reset when flashing
+int firstrunvalue = 123455;
+//********************************************
+
+String currentVersion = "1.8.2";
 String readings;
 String maxbotixranges = "unknown";
-uint32_t syncTime = 1584569584; // time of boot sync or 03/18/2020 @ 10:13pm (UTC)
+uint32_t defaultTime = 1584569584; // 03/18/2020 @ 10:13pm (UTC)
 String mllwCalibrationMess = "unknown"; // Used to display hours left for mllw calibration
+bool readSensorsNow = false;
+bool sendSensorsNow = false;
 
 const int SD_CHIP_SELECT = N_D0;
 SdFat sd;
@@ -74,10 +91,10 @@ SdCardPrintHandler printToSd(sd, SD_CHIP_SELECT, SPI_FULL_SPEED);
 STARTUP(printToSd.withMaxFilesToKeep(3000));
 
 #define SENSOR_READ_RATE_MA 6000 
-Timer readSensorTimer(SENSOR_READ_RATE_MA, readSensors);
+Timer readSensorTimer(SENSOR_READ_RATE_MA, setReadSensorsFlag);
 
 #define SENSOR_SEND_RATE_MA 60000 // Standard 60000
-Timer sendSensorTimer(SENSOR_SEND_RATE_MA, sendSensors);
+Timer sendSensorTimer(SENSOR_SEND_RATE_MA, setSendSensorsFlag);
 
 // #define SEND_TEST_DATA
 
@@ -112,16 +129,15 @@ typedef struct
     float speedfactor; // m/s
     float levelfactor;
     float pressurefactor; // millibars
-}TSunit_t;
+    uint32_t lastTime; // The last time saved to FRAM
+}Settings_t;
 
-TSunit_t tsunit;
-
-int firstrunvalue = 123456;
+Settings_t settings;
 
 String deviceString = "Devices = ";
 
-// Create an array of tsunit struct
-framArray framtsunit = node.makeFramArray(1, sizeof(tsunit));
+// Create an array of settings struct
+framArray framsettings = node.makeFramArray(1, sizeof(settings));
 
 
 // This Webhook must be created using your Particle account
@@ -173,8 +189,19 @@ typedef struct
 
 TSdata_t tsdata;
 
+void setReadSensorsFlag()
+{
+  readSensorsNow = true;
+}
+
+void setSendSensorsFlag()
+{
+  sendSensorsNow = true;
+}
+
 void readSensors()
 {
+uint32_t startmillis = millis();
   if (!checkI2CDevices())
   {
     DEBUG_PRINTLN("Error reading I2C devices. Resetting.");
@@ -185,8 +212,8 @@ void readSensors()
     delay(500);
     System.reset();
   }
-  
-  weatherSensors.captureWindVane();
+
+  weatherSensors.captureWindVane();  
   weatherSensors.captureTempHumidityPressure();
   weatherSensors.captureWaterTemp();
   weatherSensors.captureBatteryVoltage();
@@ -198,12 +225,11 @@ void readSensors()
     testNum = 0;
   }
   readingTime = testTime[testNum];
-  #else
-  // Use Particle time since the device is always on and the RTC time is not needed
-  readingTime = Time.now();
-
-  // Check to make sure that the time has not reset somehow
-  if (!(readingTime >= syncTime))
+  #else 
+  // Get the time
+  bool isTimeSynced = false;
+  readingTime = getTime(isTimeSynced);
+  if (!isTimeSynced)
   {
     if (Particle.connected())
     {
@@ -215,7 +241,6 @@ void readSensors()
     System.reset();
   }
   #endif  
-
   if (maxbotix.dualSensor)
   {
     rangeup = -maxbotix.range1Dual();
@@ -231,7 +256,6 @@ void readSensors()
   rangeup = -range[testNum];
   Time.setTime(readingTime);
   #endif
-
   if (rangeup<0)
   {
     tide.pushDistanceUpwards(rangeup,readingTime);
@@ -243,7 +267,6 @@ void readSensors()
     DEBUG_PRINT("Invalid Maxbotix readings: ");
     DEBUG_PRINTLN(maxbotixranges);
   }
-
 }
 
 void sendSensors()
@@ -258,11 +281,11 @@ void sendSensors()
   }
   readingTime = testTime[testNum];
   #else
-  // Use Particle time since the device is always on and the RTC time is not needed
-  readingTime = Time.now();
 
-  // Check to make sure that the time has not reset somehow
-  if (!(readingTime >= syncTime))
+  // Get the time
+  bool isTimeSynced = false;
+  readingTime = getTime(isTimeSynced);
+  if (!isTimeSynced)
   {
     if (Particle.connected())
     {
@@ -292,10 +315,15 @@ void sendSensors()
   tsdata.messageTime = readingTime;
   DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
   DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
+
+if (!maxbotix.isValid())
+{
+DEBUG_PRINTLN("Maxbotix timeout");  
+}
   
-  if (rangeup<0)
+  if (rangeup<0 && maxbotix.isValid())
   {
-    tsdata.field1 = (rangeup - tide.mllw())*tsunit.levelfactor;
+    tsdata.field1 = (rangeup - tide.mllw())*settings.levelfactor;
     // Send tide values
     tsdata.nullMap = tsdata.nullMap & 0B011111111111;                                      
   }
@@ -336,7 +364,7 @@ void sendSensors()
 
   }
   
-  if (tsunit.fahrenheit)
+  if (settings.fahrenheit)
   {
     tsdata.field4 = waterTempF;
     tsdata.field5 = weatherSensors.getAndResetTempF();
@@ -360,7 +388,7 @@ void sendSensors()
     tsdata.nullMap = tsdata.nullMap & 0B111110111111;
   }
   float pressurePascals = (float)weatherSensors.getAndResetPressurePascals();
-  tsdata.field7 = pressurePascals*tsunit.pressurefactor;
+  tsdata.field7 = pressurePascals*settings.pressurefactor;
   // Don't send pressure if not correct
   if (pressurePascals < 90000.0 || pressurePascals > 110000.0)
   {
@@ -384,10 +412,10 @@ void sendSensors()
     // Send value
     tsdata.nullMap = tsdata.nullMap & 0B111111101111;
   }  
-  String statusmessage = String::format("%.2f",tide.mhhw()*tsunit.levelfactor) + ":"
-                        + String::format("%.2f",tide.msl()*tsunit.levelfactor) + ":"
-                        + String::format("%.2f",tide.mllw()*tsunit.levelfactor) +":"
-                        + String::format("%.1f",gustMPH*tsunit.speedfactor)
+  String statusmessage = String::format("%.2f",tide.mhhw()*settings.levelfactor) + ":"
+                        + String::format("%.2f",tide.msl()*settings.levelfactor) + ":"
+                        + String::format("%.2f",tide.mllw()*settings.levelfactor) +":"
+                        + String::format("%.1f",gustMPH*settings.speedfactor)
   ;
   strcpy(tsdata.status,statusmessage.c_str());
   readings =
@@ -483,33 +511,116 @@ void connect()
   }
 }
 
-bool syncRTC()
+  /*
+  * Get the time.  Using this function to address potential time corruption issues.
+  * 1. Checks that the difference between last sync (settings.lastTime) and RTC time is less than 60 seconds and 
+  * less than 01/19/2038 @ 3:14am (UTC)). If it is then the time is synced. Return true.
+  * 2. If not then sync with Particle time and check that the RTC is updated correctly. Update settings.lastTime.
+  */
+uint32_t getTime(bool &isTimeValid)
 {
-    bool sync = false;
-    unsigned long syncTimer = millis();
+    uint32_t currentTime = 0;
+    uint32_t particleTime = 0;
+    isTimeValid = false;
+    // Get the last time
+    framsettings.read(0,(uint8_t*)&settings);
+    uint32_t nodeTime = node.unixTime();
 
-    do
+    if (Time.isValid())
+    // Then use Particle time.
     {
-      Particle.process();
-      delay(100);
-    } while (Time.now() < 1465823822 && millis()-syncTimer<500);
-
-    if (Time.now() > 1465823822)
-    {
-        syncTime = Time.now();//put time into memory
-        node.setUnixTime(syncTime);
-        sync = true;
-    }
-
-    if (!sync)
-    {
-        #ifdef DEBUG
-        Particle.publish("Time NOT synced",String(Time.format(syncTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(node.unixTime(), TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+      particleTime = Time.now();
+      // Time range sanity check. Must be great than last time and less than year 2038 limit.
+      if ((particleTime >= settings.lastTime) && (particleTime < 2147483646))
+      {
+        currentTime = particleTime;
+        settings.lastTime = particleTime;
+        framsettings.write(0,(uint8_t*)&settings);
+        if(updateandverifyNodeTime(particleTime))
+        {
+          isTimeValid = true;
+          DEBUG_PRINT("Using Particle time: ");
+          DEBUG_PRINTLN(String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)));
+        }
+        else
+        {
+          DEBUG_PRINT("Error. Unable to update Node Time.");
+        }
+      }
+      else // something went badly wrong
+      {
+        if (Particle.connected())
+        {
+          Particle.publish("Time NOT synced",String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(nodeTime, TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+        }
+        DEBUG_PRINT("Settings last time 1: ");
+        DEBUG_PRINTLN(String(Time.format(settings.lastTime, TIME_FORMAT_ISO8601_FULL)));
         DEBUG_PRINT("Time NOT synced: ");
-        DEBUG_PRINTLN(String(Time.format(syncTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(node.unixTime(), TIME_FORMAT_ISO8601_FULL)));
-        #endif
+        DEBUG_PRINTLN(String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(nodeTime, TIME_FORMAT_ISO8601_FULL)));
+      }
     }
-    return sync;
+    else // Rely on node RTC time or connect and sync to Particle time
+    {      
+      if ((nodeTime - settings.lastTime < 60) && (nodeTime < 2147483646))
+      {// If the time is recent (<60s old) and reasonable (< year 2038)
+        currentTime = nodeTime;
+        settings.lastTime = nodeTime;
+        framsettings.write(0,(uint8_t*)&settings);
+        isTimeValid = true;
+        DEBUG_PRINT("Using Node time: ");
+        DEBUG_PRINTLN(String(Time.format(nodeTime, TIME_FORMAT_ISO8601_FULL)));
+      }
+      else // The time is old or greater than 2038
+      {
+        // Force a connect
+        connect();
+        waitFor(Time.isValid,60000);
+        particleTime = Time.now();
+        // Time range sanity check. Must be great than last time and less than year 2038 limit.
+        if ((particleTime >= settings.lastTime) && (particleTime < 2147483646))
+        {
+          currentTime = particleTime;
+          settings.lastTime = particleTime;
+          framsettings.write(0,(uint8_t*)&settings);
+          if(updateandverifyNodeTime(particleTime))
+          {
+            isTimeValid = true;
+            DEBUG_PRINT("Connected and using Particle time: ");
+            DEBUG_PRINTLN(String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)));
+          }
+          else
+          {
+            DEBUG_PRINT("Error. Unable to update Node Time.");
+          }
+        }
+        else // something went badly wrong
+        {
+          if (Particle.connected())
+          {
+            Particle.publish("Time NOT synced",String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(nodeTime, TIME_FORMAT_ISO8601_FULL)),PRIVATE);
+          }
+          DEBUG_PRINT("Settings last time 2: ");
+          DEBUG_PRINTLN(String(Time.format(settings.lastTime, TIME_FORMAT_ISO8601_FULL)));
+          DEBUG_PRINT("Time NOT synced: ");
+          DEBUG_PRINTLN(String(Time.format(particleTime, TIME_FORMAT_ISO8601_FULL)+"  "+Time.format(nodeTime, TIME_FORMAT_ISO8601_FULL)));
+        }
+      }
+    }
+    return currentTime;
+}
+
+bool updateandverifyNodeTime(uint32_t unixtime)
+{
+  node.setUnixTime(unixtime);
+  uint32_t timeCheck = node.unixTime();
+  if (abs(timeCheck - unixtime)<2)
+  {
+    return true;
+  }
+  else
+  {
+    return false;
+  }
 }
 
 String deviceStatus;
@@ -676,6 +787,7 @@ void setup() {
   Particle.function("systemreset",systemreset);
   Particle.function("hardreset", hardreset);
   Particle.function("setunits", setunits);
+  Particle.variable("version", currentVersion);
   Particle.variable("currentReadings",readings);
   Particle.variable("devices",deviceString);
   Particle.variable("sonarRanges",maxbotixranges);
@@ -759,47 +871,49 @@ void setup() {
   bool unitsokay = false;
   do
   {
-    framtsunit.read(0,(uint8_t*)&tsunit);
-    if (tsunit.firstrun==firstrunvalue)
+    framsettings.read(0,(uint8_t*)&settings);
+    if (settings.firstrun==firstrunvalue)
     {
       unitsokay=true;
     }
     checktimes++;
   } while ((unitsokay==false)&&(checktimes<3));
 
-  // DEBUG_PRINTLNF("%1.1f",tsunit.speedfactor);
-  // DEBUG_PRINTLNF("%1.10f",tsunit.levelfactor);
-  // DEBUG_PRINTLNF("%1.8f",tsunit.fahrenheit);
-  // DEBUG_PRINTLNF("%1.10f",tsunit.pressurefactor);
-  // DEBUG_PRINTLN(tsunit.firstrun);
+  // DEBUG_PRINTLNF("%1.1f",settings.speedfactor);
+  // DEBUG_PRINTLNF("%1.10f",settings.levelfactor);
+  // DEBUG_PRINTLNF("%1.8f",settings.fahrenheit);
+  // DEBUG_PRINTLNF("%1.10f",settings.pressurefactor);
+  // DEBUG_PRINTLN(settings.firstrun);
   // DEBUG_PRINTLN(unitsokay);
 
   // Set units if the first time running
   if (!unitsokay)
   {
-    tsunit.firstrun=firstrunvalue;
+    settings.firstrun=firstrunvalue;
+    // Save the default sync time to FRAM
+    settings.lastTime = defaultTime;
     DEBUG_PRINT("Level factor = ");
-    DEBUG_PRINTLN(tsunit.levelfactor);
+    DEBUG_PRINTLN(settings.levelfactor);
     // Then first run
     DEBUG_PRINT("Setting units to: ");
     // US Options
     #ifdef UNITS_US
-      tsunit.speedfactor = 1; // mph
-      tsunit.levelfactor = 0.00328084; // mm to feet
-      tsunit.fahrenheit = true;
-      tsunit.pressurefactor = 0.01; // millibars
+      settings.speedfactor = 1; // mph
+      settings.levelfactor = 0.00328084; // mm to feet
+      settings.fahrenheit = true;
+      settings.pressurefactor = 0.01; // millibars
       DEBUG_PRINTLN("US");
     #endif
     // Use a function setunits to change these to metric
     #ifdef UNITS_METRIC
     // Metric options
-      tsunit.speedfactor = 0.44704; // m/s
-      tsunit.levelfactor = 0.001; // mm to meters
-      tsunit.fahrenheit = false;
-      tsunit.pressurefactor = 0.01; // hectopascals
+      settings.speedfactor = 0.44704; // m/s
+      settings.levelfactor = 0.001; // mm to meters
+      settings.fahrenheit = false;
+      settings.pressurefactor = 0.01; // hectopascals
       DEBUG_PRINTLN("metric");
       #endif
-    framtsunit.write(0,(uint8_t*)&tsunit); 
+    framsettings.write(0,(uint8_t*)&settings); 
   }
 
   DEBUG_PRINTLN("Starting Weather Sensors");
@@ -878,35 +992,20 @@ void setup() {
 
   startupStatus.concat(deviceString);
 
-  if (!(node.unixTime() >= syncTime))
+  // Get the time
+  bool isTimeSynced = false;
+  uint32_t startupTime = getTime(isTimeSynced);
+  if (!isTimeSynced)
   {
-    if (setupError)
-    {
-      DEBUG_PRINTLN("Time not set.");
-      startupStatus.concat("Time not set. ");
-    }
-    else
-    {
-      // Connect and set time before continuing
-      connect();
-      if (syncRTC())
-      {
-        DEBUG_PRINTLN("Time reset.");
-        startupStatus.concat("Time reset. ");
-      }
-      else
-      {
-        DEBUG_PRINTLN("Time not set.");
-        startupStatus.concat("Time not set.");
-        setupError = true;
-      }
-    }
-  }
+    DEBUG_PRINTLN("Time not set.");
+    startupStatus.concat("Time not set. ");
+    setupError = true;
+  }  
+
 
   if (setupError)
   {
     connect();
-    syncRTC();
     doneMillis = millis();
     setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
     DEBUG_PRINTLN(setupSec);
@@ -921,7 +1020,6 @@ void setup() {
   {
     if (Particle.connected()) 
     {
-      syncRTC();
       doneMillis = millis();
       setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
       DEBUG_PRINTLN(setupSec);
@@ -943,6 +1041,18 @@ void setup() {
 
 // loop() runs over and over again, as quickly as it can execute.
 void loop() {
+
+  if (sendSensorsNow)
+  {
+    sendSensors();
+    sendSensorsNow = false;
+  }
+
+  if (readSensorsNow)
+  {
+    readSensors();
+    readSensorsNow = false;
+  }
 
   maxbotix.readMaxbotixCharacter();
 
@@ -1024,23 +1134,23 @@ int systemreset(String command)
 
 int setunits(String type)
 {
- tsunit.firstrun=firstrunvalue;
+ settings.firstrun=firstrunvalue;
   if (type == "metric")
   {
-    tsunit.speedfactor = 0.44704; // m/s
-    tsunit.levelfactor = 0.001; // mm to meters
-    tsunit.fahrenheit = false;
-    tsunit.pressurefactor = 0.01; // hectopascals
-    framtsunit.write(0,(uint8_t*)&tsunit);
+    settings.speedfactor = 0.44704; // m/s
+    settings.levelfactor = 0.001; // mm to meters
+    settings.fahrenheit = false;
+    settings.pressurefactor = 0.01; // hectopascals
+    framsettings.write(0,(uint8_t*)&settings);
     DEBUG_PRINTLN("Setting units to metric.");
   }
   if (type == "us")
   {
-    tsunit.speedfactor = 1; // mph
-    tsunit.levelfactor = 0.00328084; // mm to feet
-    tsunit.fahrenheit = true;
-    tsunit.pressurefactor = 0.01; // millibars
-    framtsunit.write(0,(uint8_t*)&tsunit);
+    settings.speedfactor = 1; // mph
+    settings.levelfactor = 0.00328084; // mm to feet
+    settings.fahrenheit = true;
+    settings.pressurefactor = 0.01; // millibars
+    framsettings.write(0,(uint8_t*)&settings);
     DEBUG_PRINTLN("Setting units to us.");
   }
   return 0;

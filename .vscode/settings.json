@@ -6,8 +6,11 @@
         "*.ino": "cpp",
         "iterator": "cpp",
         "random": "cpp",
-        "future": "cpp"
+        "future": "cpp",
+        "*.tcc": "cpp",
+        "streambuf": "cpp"
     },
-    "particle.firmwareVersion": "1.5.0",
-    "particle.targetPlatform": "boron"
+    "particle.firmwareVersion": "1.5.1",
+    "particle.targetPlatform": "argon",
+    "particle.targetDevice": "Argon-IoTNode-1"
 }
