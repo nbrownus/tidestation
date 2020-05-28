@@ -10,7 +10,7 @@
         "*.tcc": "cpp",
         "streambuf": "cpp"
     },
-    "particle.firmwareVersion": "1.5.1",
+    "particle.firmwareVersion": "1.5.2",
     "particle.targetPlatform": "argon",
     "particle.targetDevice": "Argon-IoTNode-1"
 }

@@ -3,6 +3,8 @@
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
  * Date: May 2020
+ * Version 1.8.3
+ * Fixed debug message for invalid range on send
  * Version 1.8.2
  * Set flags using timers for readSensors and sendSensors
  * Move readSensors and sendSensors to loop to minimize timing conflicts
@@ -75,7 +77,7 @@ SYSTEM_THREAD(ENABLED);
 int firstrunvalue = 123455;
 //********************************************
 
-String currentVersion = "1.8.2";
+String currentVersion = "1.8.3";
 String readings;
 String maxbotixranges = "unknown";
 uint32_t defaultTime = 1584569584; // 03/18/2020 @ 10:13pm (UTC)
@@ -301,10 +303,12 @@ void sendSensors()
   if (maxbotix.dualSensor)
   {
     rangeup = -maxbotix.range1Dual();
+    maxbotixranges = String("Range 1:"+String(maxbotix.range1Median())+", "+"Range 2:"+String(maxbotix.range2Median()));
   }
   else
   {
     rangeup = -maxbotix.range1Median();
+    maxbotixranges = String("Range 1:"+String(maxbotix.range1Median()));
   }
 
   #ifdef SEND_TEST_DATA
@@ -313,24 +317,27 @@ void sendSensors()
   Time.setTime(readingTime);
   #endif
   tsdata.messageTime = readingTime;
-  DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
-  DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));
 
-if (!maxbotix.isValid())
-{
-DEBUG_PRINTLN("Maxbotix timeout");  
-}
+
+  if (!maxbotix.isValid())
+  {
+  DEBUG_PRINTLN("Maxbotix timeout");  
+  }
   
   if (rangeup<0 && maxbotix.isValid())
   {
     tsdata.field1 = (rangeup - tide.mllw())*settings.levelfactor;
     // Send tide values
-    tsdata.nullMap = tsdata.nullMap & 0B011111111111;                                      
+    tsdata.nullMap = tsdata.nullMap & 0B011111111111;
+    DEBUG_PRINTF("Maxbotix range is %d mm at ",rangeup);
+    DEBUG_PRINTLN(String(Time.format(readingTime, TIME_FORMAT_ISO8601_FULL)));                                        
   }
   else
   {
     // Send null for field 1
     tsdata.nullMap = tsdata.nullMap | 0B100000000000;
+    DEBUG_PRINT("Invalid Maxbotix readings not sent to ThingSpeak: ");
+    DEBUG_PRINTLN(maxbotixranges);
   }
   if (tide.mllw()==0)
   {
