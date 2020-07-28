@@ -11,6 +11,6 @@
         "streambuf": "cpp"
     },
     "particle.firmwareVersion": "1.5.2",
-    "particle.targetPlatform": "argon",
-    "particle.targetDevice": "Argon-IoTNode-1"
+    "particle.targetPlatform": "boron",
+    "particle.targetDevice": "Glasseels1"
 }

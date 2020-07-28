@@ -2,7 +2,9 @@
  * Project TideStation
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
- * Date: May 2020
+ * Date: June 2020
+ * Version 1.8.4
+ * Increased reset delay for no IoT Node detected to allow time to update
  * Version 1.8.3
  * Fixed debug message for invalid range on send
  * Version 1.8.2
@@ -74,10 +76,10 @@ SYSTEM_THREAD(ENABLED);
 
 //********************************************
 // Change this value to force the settings to be reset when flashing
-int firstrunvalue = 123455;
+int firstrunvalue = 123458;
 //********************************************
 
-String currentVersion = "1.8.3";
+String currentVersion = "1.8.4";
 String readings;
 String maxbotixranges = "unknown";
 uint32_t defaultTime = 1584569584; // 03/18/2020 @ 10:13pm (UTC)
@@ -1017,10 +1019,23 @@ void setup() {
     setupSec = String::format("Setup seconds: %d .",doneMillis/1000);
     DEBUG_PRINTLN(setupSec);
     startupStatus.concat(setupSec);
-    startupStatus.concat("Startup Error. Resetting.");
+    startupStatus.concat("Startup Error. Resetting in 5 minutes.");
     Particle.publish("Startup status",startupStatus,PRIVATE);
     DEBUG_PRINTLN(startupStatus);
-    delay(3000);
+    uint32_t millistart = millis();
+    uint32_t timertensec = millis();
+    // Wait 300 s to reset and send message every 10s
+    while (millis()-millistart<300000)
+    {
+      Particle.process();
+      if (millis()-timertensec>10000)
+      {
+        String resettime = String(300000-(millis()-millistart));
+        Particle.publish("Time to reset in ms",resettime,PRIVATE);
+        timertensec = millis();
+      }
+
+    }
     System.reset();
   }
   else
