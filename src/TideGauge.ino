@@ -2,7 +2,10 @@
  * Project TideStation
  * Description: Sentient Things Tide Station
  * Author: Robert Mawrey
- * Date: June 2020
+ * Date: Octobert 2020
+ * Version 1.8.5
+ * Added firstrunvalue variable
+ * Changed vitals to every 10 minutes
  * Version 1.8.4
  * Increased reset delay for no IoT Node detected to allow time to update
  * Version 1.8.3
@@ -79,7 +82,7 @@ SYSTEM_THREAD(ENABLED);
 int firstrunvalue = 123458;
 //********************************************
 
-String currentVersion = "1.8.4";
+String currentVersion = "1.8.5";
 String readings;
 String maxbotixranges = "unknown";
 uint32_t defaultTime = 1584569584; // 03/18/2020 @ 10:13pm (UTC)
@@ -443,7 +446,7 @@ void sendSensors()
 
   thingSpeak.queueToSend((u_int8_t*)&tsdata);
   node.tickleWatchdog();
-  Particle.publishVitals();  // Publish vitals immmediately 
+  //Particle.publishVitals();  // Publish vitals immmediately 
 }
 
 // Adding explicit connect routine that has to work before the rest of the code runs
@@ -517,6 +520,7 @@ void connect()
   else
   {
     DEBUG_PRINTLN("Particle connected");
+    Particle.publishVitals(600);
   }
 }
 
@@ -801,6 +805,7 @@ void setup() {
   Particle.variable("devices",deviceString);
   Particle.variable("sonarRanges",maxbotixranges);
   Particle.variable("mllwCalibration",mllwCalibrationMess);
+  Particle.variable("firstRunValue",firstrunvalue);
 
   // Used for debug
   // pinMode(D5,OUTPUT);
