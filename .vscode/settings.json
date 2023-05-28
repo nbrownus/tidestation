@@ -1,16 +1,16 @@
 {
     "extensions.ignoreRecommendations": true,
     "C_Cpp.default.configurationProvider": "particle.particle-vscode-core",
-    "cortex-debug.openocdPath": "${command:particle.getDebuggerOpenocdPath}",
     "files.associations": {
         "*.ino": "cpp",
         "iterator": "cpp",
         "random": "cpp",
         "future": "cpp",
         "*.tcc": "cpp",
-        "streambuf": "cpp"
+        "streambuf": "cpp",
+        "format": "cpp"
     },
-    "particle.firmwareVersion": "1.5.2",
-    "particle.targetPlatform": "boron",
-    "particle.targetDevice": "Glasseels1"
+    "particle.firmwareVersion": "4.0.2",
+    "particle.targetPlatform": "argon",
+    "particle.targetDevice": "e00fce681dc2b55c7f34a428",
 }
