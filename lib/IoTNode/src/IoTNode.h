@@ -11,6 +11,7 @@
 #include <Adafruit_MCP23017.h>
 #include "MCP7941x.h"
 #include "FramI2C.h"
+#include <SdFat.h>
 
 // Globals defined here
 
@@ -328,6 +329,14 @@ class IoTNode
    */
   IoTNode();
 
+  /**
+   * @brief Start the IoT Node.
+   * Sets the state of the internal MCP23018 expander.
+   * Reads the node mac address stored in the MCP79412
+   * real time clock. Starts (Wire) I2C if needed.
+   * Checks
+   * 
+   */
 
   /**
    * @brief Start the IoT Node.
@@ -443,6 +452,14 @@ class IoTNode
    * @param seconds time in seconds to switch off the power
    */
   void switchOffFor(long seconds);
+
+  /**
+   * @brief Clear the RTC clock power off state so that the IoT Node can be switched
+   * back to RTC Control mode without switching off.  Useful if one needs to use the
+   * switched to manually overwrite the RTC switched off state.
+   * 
+   */
+  void resetRTCSwitch();
 
   /**
    * @brief Set the selected I/O connector GPIO pin pullup
@@ -571,6 +588,24 @@ class IoTNode
   String nodeID;
 
   /**
+   * @brief Copies the FRAM memory from byte 129 onwards to a file on the uSD card
+   * 
+   * @param filename 
+   * @return true 
+   * @return false 
+   */
+  bool backupFRAMtoSD(String filename);
+
+  /**
+   * @brief Restores a previous backup of FRAM from a file on the uSD card to FRAM
+   * 
+   * @param filename 
+   * @return true 
+   * @return false 
+   */
+  bool restoreFRAMfromSD(String filename);
+
+  /**
    * @brief Create a ring array of elements in Fram.
    * The function keeps track of the ring array pointers.
    * IoT Node includes a 256 kbits MB85RC256V I2C Fram
@@ -630,6 +665,8 @@ class IoTNode
   private:
   void array_to_string(byte array[], unsigned int len, char buffer[]);
   FramI2C myFram;
+  void writeFRAM(uint32_t startaddress, uint8_t numberOfBytes, uint8_t *buffer);
+  void readFRAM(uint32_t startaddress, uint8_t numberOfBytes, uint8_t *buffer);
 };
 
 #endif
