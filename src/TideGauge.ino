@@ -40,6 +40,7 @@ typedef struct {
     float mv;
     bool isCharged;
     bool isCharging;
+    bool isLiPoPowered;
 
 
 } reading_t;
@@ -143,12 +144,14 @@ void readPower(reading_t &reading) {
   reading.mv = node.voltage();
   reading.isCharged = node.isLiPoCharged();
   reading.isCharging = node.isLiPoCharging();
+  reading.isLiPoPowered = node.isLiPoPowered();
 }
 
 void sendSensors() {
   readRange(reading);
   readWind(reading);
   readAir(reading);
+  readPower(reading);
 
   String status = "";
   status += String::format("battery=%f;", reading.mv); //TODO
@@ -156,6 +159,7 @@ void sendSensors() {
 
   status += String::format("liPoCharged=%i;", reading.isCharged); //TODO
   status += String::format("liPoCharging=%i;", reading.isCharging); //TODO
+  status += String::format("liPoPowered=%i;", reading.isLiPoPowered); //TODO
 
   status += String::format("temp=%f;", reading.airTemp);
   status += String::format("pressure=%f;", reading.airPressure);
@@ -168,6 +172,8 @@ void sendSensors() {
 
   DEBUG_PRINTLN(status);
   mqClient.publish("/weatherStation/state", status, true);
+  Particle.publish("Status", status, PRIVATE);
+
 }
 
 void connect() {
