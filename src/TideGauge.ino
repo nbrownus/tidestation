@@ -156,6 +156,8 @@ void sendSensors() {
 
   status += String::format("liPoCharged=%i;", reading.isCharged); //TODO
   status += String::format("liPoCharging=%i;", reading.isCharging); //TODO
+
+  status += String::format("temp=%f;", reading.airTemp);
   status += String::format("pressure=%f;", reading.airPressure);
   status += String::format("rain=%f;", reading.rain);
   status += String::format("waterLevel=%f;", reading.range); //Verify
@@ -165,7 +167,7 @@ void sendSensors() {
   status += String::format("windSpeed=%f;", reading.windMPH);
 
   DEBUG_PRINTLN(status);
-  mqClient.publish("/weatherStation/state", status, true)
+  mqClient.publish("/weatherStation/state", status, true);
 }
 
 void connect() {
